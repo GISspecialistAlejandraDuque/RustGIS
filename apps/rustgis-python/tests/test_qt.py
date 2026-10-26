@@ -6,7 +6,9 @@ import os
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-pytest.importorskip("PySide6.QtWebEngineWidgets")
+if os.environ.get("RUSTGIS_TEST_QT") != "1":
+    # Skipped where Qt WebEngine isn't installed; CI's Qt job sets RUSTGIS_TEST_QT to require it.
+    pytest.importorskip("PySide6.QtWebEngineWidgets")
 
 from rustgis.qt import HOST_URL, MapWidget, _host_page  # noqa: E402  (before the QApplication)
 

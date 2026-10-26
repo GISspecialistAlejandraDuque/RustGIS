@@ -51,18 +51,21 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - name: Build and install
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "./apps/rustgis-python[test,geopandas]"
-      # rustgis.qt's tests need Qt WebEngine: one Linux job installs it (a large download).
-      - name: Install Qt
+      # rustgis.qt's tests need Qt WebEngine: one Linux job installs it (a large download) and
+      # fails, rather than skips them, when it can't be imported.
+      - name: Install Qt system libraries
         if: runner.os == 'Linux' && matrix.python == '3.12'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libegl1 libxkbcommon0 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
-          python -m pip install "./apps/rustgis-python[qt]"
+          echo "RUSTGIS_TEST_QT=1" >> "$GITHUB_ENV"
+      - name: Build and install
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          extras="test,geopandas"
+          if [ "${RUSTGIS_TEST_QT:-}" = "1" ]; then extras="$extras,qt"; fi
+          python -m pip install "./apps/rustgis-python[$extras]"
       - name: Test
         working-directory: apps/rustgis-python
         run: python -m pytest -q

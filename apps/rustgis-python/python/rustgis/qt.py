@@ -149,8 +149,11 @@ class MapWidget(QWidget, _Embedded):
         self._view.page().setWebChannel(self._channel)
         # A reload starts a page without `rustgisHost`: messages wait for its "host" again.
         self._view.loadStarted.connect(self._unready)
+        # The page first: if it can't be built, the session is left as it was. setHtml takes up
+        # to 2 MB; the page is Qt's qwebchannel.js and _widget.js, a few dozen KB.
+        page = _host_page(self._src)
         self._start(session, sample, data)
-        self._view.setHtml(_host_page(self._src), QUrl(HOST_URL))
+        self._view.setHtml(page, QUrl(HOST_URL))
 
     @property
     def view(self) -> QWebEngineView:
