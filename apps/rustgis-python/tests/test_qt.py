@@ -102,3 +102,15 @@ def test_options_and_the_session(app, tmp_path):
     # A small file travels with the project: the app can't read the path.
     assert str(path) not in w._project
     assert repr(w) == "MapWidget(layers=['sites'])"
+
+
+def test_a_reload_holds_messages_until_the_page_starts_again(widget):
+    from_page(widget, {"type": "host"})
+    widget.scripts.clear()
+    widget._unready()  # what loadStarted calls
+    widget.run_in_app("ui.theme", theme="dark")
+    widget.add_geojson(POINT, name="Sites")
+    assert widget.scripts == []
+    from_page(widget, {"type": "host"})
+    project, run = widget.scripts
+    assert "Sites" in project and '"ui.theme"' in run

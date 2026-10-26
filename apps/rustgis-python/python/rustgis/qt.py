@@ -147,6 +147,8 @@ class MapWidget(QWidget, _Embedded):
         self._channel = QWebChannel(self._view.page())
         self._channel.registerObject("rustgis", self._bridge)
         self._view.page().setWebChannel(self._channel)
+        # A reload starts a page without `rustgisHost`: messages wait for its "host" again.
+        self._view.loadStarted.connect(self._unready)
         self._start(session, sample, data)
         self._view.setHtml(_host_page(self._src), QUrl(HOST_URL))
 
@@ -178,6 +180,10 @@ class MapWidget(QWidget, _Embedded):
             self._js(f"window.rustgisHost.custom({json.dumps(message)})")
         else:
             self._waiting.append(message)
+
+    def _unready(self) -> None:
+        """Holds messages for the page until the one loading has started."""
+        self._ready = False
 
     def _js(self, script: str) -> None:
         """Runs a script in the host page.
