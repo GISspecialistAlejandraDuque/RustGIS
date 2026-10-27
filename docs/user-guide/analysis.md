@@ -511,10 +511,13 @@ The Analyze tab's imagery groups open their tools in the Workflows pane:
   - **Another raster's grid:** `"grid": "dem_100m"` takes its coordinate system, cells and extent
     exactly, instead of `crs`, `cellSize`, `origin` and `extent`.
   - **Resampling:** `nearest` (the default: it never invents a value, which is right for classes),
-    `bilinear` or `cubic` sample each cell at its centre. `average` and `mode` take every pixel whose
-    centre falls in the cell (no-data skipped), its mean or its most frequent value (of those
-    tied, the one that reaches the top count first, the pixels taken row by row, as in GDAL), which
-    is what a coarser grid of elevation or land-cover classes should hold. A
+    `bilinear` or `cubic` sample each cell at its centre. A cell whose centre falls on a no-data
+    pixel is no-data; otherwise they average the pixels around it that have a value, as gdalwarp
+    does. Going coarser, they skip the detail between cell centres and can give a jagged result:
+    use `average` there, which comes closest to gdalwarp's smoothing. `average` and `mode` take
+    every pixel whose centre falls in the cell (no-data skipped), its mean or its most frequent
+    value (of those tied, the one that reaches the top count first, the pixels taken row by row, as
+    in GDAL), which is what a coarser grid of elevation or land-cover classes should hold. A
     cell no pixel centre falls in, on a grid finer than the raster, takes the pixel under its
     centre. Classes take `nearest` or `mode`, continuous values `bilinear` or `cubic`, or `average`
     going coarser. A whole-number pixel type keeps its type, so its mean is rounded. On a colour

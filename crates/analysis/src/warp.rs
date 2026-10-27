@@ -138,7 +138,16 @@ impl Sampler<'_> {
         let (u, v) = (c - 0.5, row - 0.5);
         let (i0, j0) = (u.floor() as i64, v.floor() as i64);
         let (fu, fv) = (u - i0 as f64, v - j0 as f64);
+        // A position on a pixel with no value has none either, as in GDAL, rather than the mean of
+        // the neighbours that have one (#973). Only where the raster has a no-data value: an
+        // image's alpha keeps blending its edges. GDAL's 1e-10 puts a position on a pixel's edge
+        // in the pixel after it.
+        let under = self.r.nodata.is_some().then(|| index((c + 1e-10).floor() as i64, (row + 1e-10).floor() as i64));
         for (b, o) in out.iter_mut().enumerate() {
+            if under.is_some_and(|idx| self.at(b, idx).is_none()) {
+                *o = f32::NAN;
+                continue;
+            }
             let cubic = (self.method == Resampling::Cubic).then(|| self.cubic(b, &index, i0, j0, fu, fv)).flatten();
             *o = cubic.unwrap_or_else(|| self.bilinear(b, &index, i0, j0, fu, fv));
             if self.round && o.is_finite() {
@@ -974,6 +983,50 @@ mod tests {
 
     fn values(r: &Raster) -> Vec<Option<f32>> {
         (0..i64::from(r.height)).flat_map(|row| (0..i64::from(r.width)).map(move |c| (c, row))).map(|(c, row)| r.value(0, c, row)).collect()
+    }
+
+    /// Bilinear and cubic leave a cell no-data where the pixel under its centre is no-data, and
+    /// otherwise average the valid neighbours, as gdalwarp does (#973).
+    #[test]
+    fn bilinear_and_cubic_leave_a_cell_over_no_data_without_a_value() {
+        // 6 × 6 pixels, value = column + 10 · row, with a 2 × 2 no-data hole at columns and rows
+        // 2–3; cells shifted a quarter pixel, so cell (k, r) is centred in pixel (k, r + 1).
+        let mut v: Vec<f32> = (0..36).map(|i| (i % 6 + 10 * (i / 6)) as f32).collect();
+        for idx in [14, 15, 20, 21] {
+            v[idx] = -1.0;
+        }
+        let r = utm(6, 6, v, "Float32");
+        let g = Grid::snapped(r.crs, [0.25, 0.25, 5.25, 5.25], (1.0, 1.0), (0.25, 0.25)).unwrap();
+        assert_eq!((g.width, g.height), (5, 5));
+        // gdalwarp -r bilinear and -r cubic (GDAL 3.12.2 and 3.13.1) on the same grid.
+        let n = None;
+        let gdal = [
+            [Some(7.75), Some(8.75), Some(9.75), Some(10.75), Some(11.75)],
+            [Some(17.75), Some(18.0), n, n, Some(21.75)],
+            [Some(27.75), Some(28.5), n, n, Some(31.75)],
+            [Some(37.75), Some(39.2), Some(42.25), Some(42.538_46), Some(41.75)],
+            [Some(47.75), Some(48.75), Some(49.75), Some(50.75), Some(51.75)],
+        ];
+        let out = values(&project(&r, &g, Method::Sample(Resampling::Bilinear), "b".into()).unwrap());
+        for (got, want) in out.iter().zip(gdal.iter().flatten()) {
+            assert_eq!(got.is_some(), want.is_some(), "{out:?}");
+            if let (Some(a), Some(b)) = (got, want) {
+                assert!((a - b).abs() < 1e-4, "{out:?}");
+            }
+        }
+        // Cubic: the cells over the hole have no value either, and those next to it fall back to
+        // bilinear (a no-data pixel among their sixteen), as in GDAL.
+        let out = values(&project(&r, &g, Method::Sample(Resampling::Cubic), "c".into()).unwrap());
+        for (i, (got, want)) in out.iter().zip(gdal.iter().flatten()).enumerate() {
+            assert_eq!(got.is_some(), want.is_some(), "{out:?}");
+            let (row, col) = (i / 5, i % 5);
+            if (1..=3).contains(&row)
+                && (1..=4).contains(&col)
+                && let (Some(a), Some(b)) = (got, want)
+            {
+                assert!((a - b).abs() < 1e-4, "cell ({col}, {row}): {out:?}");
+            }
+        }
     }
 
     /// Average and mode take every pixel whose centre falls in a cell, no-data skipped; mode's
