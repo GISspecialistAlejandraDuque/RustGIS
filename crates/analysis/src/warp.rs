@@ -628,9 +628,9 @@ fn sampled(
 }
 
 /// `r` on the grid `g`, each cell the mean (or, with `mode`, the most frequent value, with GDAL's
-/// tie rule: see [`mode_of`]) of the pixels whose centres fall in it. A cell's corners are placed on the
-/// image (`source`) and the pixel centres inside the quadrilateral they make are taken; one with
-/// none takes the pixel under its centre. A palette image takes the mode.
+/// tie rule: see [`mode_of`]) of the pixels whose centres fall in it. A cell's corners are placed
+/// on the image (`source`) and the pixel centres inside the quadrilateral they make are taken; one
+/// with none takes the pixel under its centre. A palette image takes the mode.
 fn aggregated(
     r: &Raster,
     g: &Grid,
@@ -769,7 +769,8 @@ fn mean_of((sum, weight): (f64, f64), round: bool) -> f32 {
 /// the top count first, `v` taken in its order (the cell's pixels, row by row), as GDAL's `mode`
 /// does: a cell of 3, 5, 5, 3 takes 5, one of 5, 3, 3, 5 takes 3.
 fn mode_of(v: &[f32]) -> f32 {
-    let mut counts: HashMap<u32, usize> = HashMap::with_capacity(v.len());
+    // Capped: a cell can take many pixels, and a few distinct values are the common case.
+    let mut counts: HashMap<u32, usize> = HashMap::with_capacity(v.len().min(256));
     let (mut best, mut best_n) = (f32::NAN, 0usize);
     for &x in v {
         // `+ 0.0` counts -0.0 and 0.0 as one value, as `==` does.
