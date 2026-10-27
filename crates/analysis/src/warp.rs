@@ -1000,6 +1000,8 @@ mod tests {
         classes[4..6].copy_from_slice(&[3.0, 5.0]);
         let mirrored = project(&utm(4, 4, classes, "UInt8"), &g, Method::Mode, "m".into()).unwrap();
         assert_eq!(values(&mirrored)[0], Some(3.0));
+        // -0.0 and 0.0 are one value: the zero reaches two first, the 1 before it doesn't.
+        assert_eq!(mode_of(&[1.0, -0.0, 0.0]), 0.0);
         // A whole-number type's mean is rounded: (3 + 5 + 5 + 3) / 4 = 4, (7 + 7 + 7 + 2) / 4 = 5.75.
         let avg = project(&r, &g, Method::Average, "a".into()).unwrap();
         assert_eq!(values(&avg)[..2], [Some(4.0), Some(6.0)]);
