@@ -512,8 +512,8 @@ The Analyze tab's imagery groups open their tools in the Workflows pane:
     exactly, instead of `crs`, `cellSize`, `origin` and `extent`.
   - **Resampling:** `nearest` (the default: it never invents a value, which is right for classes),
     `bilinear` or `cubic` sample each cell at its centre. A cell whose centre falls on a no-data
-    pixel is no-data; otherwise they average the pixels around it that have a value, as gdalwarp
-    does. Going coarser, they skip the detail between cell centres and can give a jagged result:
+    pixel (or on NaN, with or without a no-data value) is no-data; otherwise they average the
+    pixels around it that have a value, as gdalwarp does. Going coarser, they skip the detail between cell centres and can give a jagged result:
     use `average` there, which comes closest to gdalwarp's smoothing. `average` and `mode` take
     every pixel whose centre falls in the cell (no-data skipped), its mean or its most frequent
     value (of those tied, the one that reaches the top count first, the pixels taken row by row, as

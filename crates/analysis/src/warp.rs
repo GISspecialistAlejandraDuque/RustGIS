@@ -127,10 +127,12 @@ impl Sampler<'_> {
     fn sample(&self, c: f64, row: f64, out: &mut [f32]) {
         let (w, h) = (i64::from(self.r.width), i64::from(self.r.height));
         let index = |i: i64, j: i64| (j.clamp(0, h - 1) * w + i.clamp(0, w - 1)) as usize;
+        // The pixel under the position. GDAL's 1e-10 puts a position on a pixel's edge in the
+        // pixel after it.
+        let centre = index((c + 1e-10).floor() as i64, (row + 1e-10).floor() as i64);
         if self.method == Resampling::Nearest {
-            let idx = index(c.floor() as i64, row.floor() as i64);
             for (b, o) in out.iter_mut().enumerate() {
-                *o = self.at(b, idx).unwrap_or(f32::NAN);
+                *o = self.at(b, centre).unwrap_or(f32::NAN);
             }
             return;
         }
@@ -139,12 +141,11 @@ impl Sampler<'_> {
         let (i0, j0) = (u.floor() as i64, v.floor() as i64);
         let (fu, fv) = (u - i0 as f64, v - j0 as f64);
         // A position on a pixel with no value has none either, as in GDAL, rather than the mean of
-        // the neighbours that have one (#973). Only where the raster has a no-data value: an
-        // image's alpha keeps blending its edges. GDAL's 1e-10 puts a position on a pixel's edge
-        // in the pixel after it.
-        let under = self.r.nodata.is_some().then(|| index((c + 1e-10).floor() as i64, (row + 1e-10).floor() as i64));
+        // the neighbours that have one (#973). That includes NaN in a raster without a no-data
+        // value (gdalwarp with `-srcnodata nan`). A colour image's pixels always have a value, so
+        // its alpha still blends the edges.
         for (b, o) in out.iter_mut().enumerate() {
-            if under.is_some_and(|idx| self.at(b, idx).is_none()) {
+            if self.at(b, centre).is_none() {
                 *o = f32::NAN;
                 continue;
             }
@@ -995,10 +996,15 @@ mod tests {
         for idx in [14, 15, 20, 21] {
             v[idx] = -1.0;
         }
+        // The hole as the no-data value, and as NaN in a raster without one.
+        let nan: Vec<f32> = v.iter().map(|&x| if x < 0.0 { f32::NAN } else { x }).collect();
         let r = utm(6, 6, v, "Float32");
+        let mut no_nodata = utm(6, 6, nan, "Float32");
+        no_nodata.nodata = None;
         let g = Grid::snapped(r.crs, [0.25, 0.25, 5.25, 5.25], (1.0, 1.0), (0.25, 0.25)).unwrap();
         assert_eq!((g.width, g.height), (5, 5));
-        // gdalwarp -r bilinear and -r cubic (GDAL 3.12.2 and 3.13.1) on the same grid.
+        // gdalwarp -r bilinear and -r cubic (GDAL 3.12.2 and 3.13.1) on the same grid; the NaN
+        // raster with `-srcnodata nan` gives the same values.
         let n = None;
         let gdal = [
             [Some(7.75), Some(8.75), Some(9.75), Some(10.75), Some(11.75)],
@@ -1007,24 +1013,27 @@ mod tests {
             [Some(37.75), Some(39.2), Some(42.25), Some(42.538_46), Some(41.75)],
             [Some(47.75), Some(48.75), Some(49.75), Some(50.75), Some(51.75)],
         ];
-        let out = values(&project(&r, &g, Method::Sample(Resampling::Bilinear), "b".into()).unwrap());
-        for (got, want) in out.iter().zip(gdal.iter().flatten()) {
-            assert_eq!(got.is_some(), want.is_some(), "{out:?}");
-            if let (Some(a), Some(b)) = (got, want) {
-                assert!((a - b).abs() < 1e-4, "{out:?}");
+        for r in [&r, &no_nodata] {
+            let out = values(&project(r, &g, Method::Sample(Resampling::Bilinear), "b".into()).unwrap());
+            for (got, want) in out.iter().zip(gdal.iter().flatten()) {
+                assert_eq!(got.is_some(), want.is_some(), "{out:?}");
+                if let (Some(a), Some(b)) = (got, want) {
+                    assert!((a - b).abs() < 1e-4, "{out:?}");
+                }
             }
-        }
-        // Cubic: the cells over the hole have no value either, and those next to it fall back to
-        // bilinear (a no-data pixel among their sixteen), as in GDAL.
-        let out = values(&project(&r, &g, Method::Sample(Resampling::Cubic), "c".into()).unwrap());
-        for (i, (got, want)) in out.iter().zip(gdal.iter().flatten()).enumerate() {
-            assert_eq!(got.is_some(), want.is_some(), "{out:?}");
-            let (row, col) = (i / 5, i % 5);
-            if (1..=3).contains(&row)
-                && (1..=4).contains(&col)
-                && let (Some(a), Some(b)) = (got, want)
-            {
-                assert!((a - b).abs() < 1e-4, "cell ({col}, {row}): {out:?}");
+            // Cubic: the cells over the hole have no value either. The others in columns 1–4 of
+            // rows 1–3 have a hole pixel among their sixteen, so they fall back to bilinear, as in
+            // GDAL; this test doesn't reach the cubic kernel itself.
+            let out = values(&project(r, &g, Method::Sample(Resampling::Cubic), "c".into()).unwrap());
+            for (i, (got, want)) in out.iter().zip(gdal.iter().flatten()).enumerate() {
+                assert_eq!(got.is_some(), want.is_some(), "{out:?}");
+                let (row, col) = (i / 5, i % 5);
+                if (1..=3).contains(&row)
+                    && (1..=4).contains(&col)
+                    && let (Some(a), Some(b)) = (got, want)
+                {
+                    assert!((a - b).abs() < 1e-4, "cell ({col}, {row}): {out:?}");
+                }
             }
         }
     }
