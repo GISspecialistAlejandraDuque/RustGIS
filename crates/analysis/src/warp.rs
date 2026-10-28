@@ -127,8 +127,8 @@ impl Sampler<'_> {
     fn sample(&self, c: f64, row: f64, out: &mut [f32]) {
         let (w, h) = (i64::from(self.r.width), i64::from(self.r.height));
         let index = |i: i64, j: i64| (j.clamp(0, h - 1) * w + i.clamp(0, w - 1)) as usize;
-        // The pixel under the position. GDAL's 1e-10 puts a position on a pixel's edge in the
-        // pixel after it.
+        // The pixel under the position. The 1e-10 (as in GDAL) keeps a position a rounding error
+        // below a pixel's edge in the pixel after it.
         let centre = index((c + 1e-10).floor() as i64, (row + 1e-10).floor() as i64);
         if self.method == Resampling::Nearest {
             for (b, o) in out.iter_mut().enumerate() {
@@ -944,6 +944,31 @@ mod tests {
         assert!(out.bands[0].data.iter().all(|v| *v == 10.0 || *v == -9999.0));
     }
 
+    /// The control-point warp shares the no-data rule of #973: a cell whose centre falls on a
+    /// no-data pixel has no value, even with valid pixels around it.
+    #[test]
+    fn warp_leaves_a_cell_over_no_data_without_a_value() {
+        // 6 × 6 pixels of 10 with a 2 × 2 no-data hole at columns and rows 2–3, placed 1 m a pixel
+        // with no turn; half-metre cells, centred a quarter pixel from the pixel edges.
+        let gt = GeoTransform { origin_x: 0.0, origin_y: 6.0, pixel_width: 1.0, pixel_height: -1.0 };
+        let mut data = vec![10.0f32; 36];
+        for idx in [14, 15, 20, 21] {
+            data[idx] = -9999.0;
+        }
+        let r = Raster::new("nd", 6, 6, vec![data], gt, Crs::LonLat, Some(-9999.0), ColorHint::Gray, "Float32").unwrap();
+        let fit = georef::fit(Kind::Similarity, &gcps(6.0, 6.0, |c, rw| (500_000.0 + c, 4_000_000.0 - rw))).unwrap();
+        let out = warp(&r, &fit, &opts(Some(0.5), Resampling::Bilinear)).unwrap();
+        // 12 × 12 cells over the image (one more column or row if the fit rounds the footprint up).
+        assert!(out.width >= 12 && out.height >= 12);
+        // The 4 × 4 cells over the hole have no value; before, the outer ring of them took the mean
+        // of the valid neighbours and only the middle 2 × 2 were no-data.
+        let empty: Vec<(i64, i64)> =
+            (0..12).flat_map(|row| (0..12).map(move |c| (c, row))).filter(|&(c, row)| out.value(0, c, row).is_none()).collect();
+        let hole: Vec<(i64, i64)> = (4..8).flat_map(|row| (4..8).map(move |c| (c, row))).collect();
+        assert_eq!(empty, hole);
+        assert!(out.bands[0].data.iter().all(|v| *v == 10.0 || *v == -9999.0));
+    }
+
     #[test]
     fn hostile_fits_and_options_are_refused() {
         let r = scan(4, 4, vec![vec![1.0; 16]], ColorHint::Gray, "Float32");
@@ -1015,8 +1040,8 @@ mod tests {
             [Some(37.75), Some(39.2), Some(42.25), Some(42.538_46), Some(41.75)],
             [Some(47.75), Some(48.75), Some(49.75), Some(50.75), Some(51.75)],
         ];
-        for r in [&r, &no_nodata] {
-            let out = values(&project(r, &g, Method::Sample(Resampling::Bilinear), "b".into()).unwrap());
+        for src in [&r, &no_nodata] {
+            let out = values(&project(src, &g, Method::Sample(Resampling::Bilinear), "b".into()).unwrap());
             for (got, want) in out.iter().zip(gdal.iter().flatten()) {
                 assert_eq!(got.is_some(), want.is_some(), "{out:?}");
                 if let (Some(a), Some(b)) = (got, want) {
@@ -1026,7 +1051,7 @@ mod tests {
             // Cubic: the cells over the hole have no value either. The others in columns 1–4 of
             // rows 1–3 have a hole pixel among their sixteen, so they fall back to bilinear, as in
             // GDAL; this test doesn't reach the cubic kernel itself.
-            let out = values(&project(r, &g, Method::Sample(Resampling::Cubic), "c".into()).unwrap());
+            let out = values(&project(src, &g, Method::Sample(Resampling::Cubic), "c".into()).unwrap());
             for (i, (got, want)) in out.iter().zip(gdal.iter().flatten()).enumerate() {
                 assert_eq!(got.is_some(), want.is_some(), "{out:?}");
                 let (row, col) = (i / 5, i % 5);
