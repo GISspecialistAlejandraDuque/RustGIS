@@ -142,13 +142,15 @@ impl Sampler<'_> {
         let (fu, fv) = (u - i0 as f64, v - j0 as f64);
         // A position on a pixel with no value has none either, as in GDAL, rather than the mean of
         // the neighbours that have one (#973). That includes NaN in a raster without a no-data
-        // value (gdalwarp with `-srcnodata nan`). A colour image's pixels always have a value, so
-        // its alpha still blends the edges.
+        // value (gdalwarp with `-srcnodata nan`). The pixel has no value only where every band
+        // but alpha is no-data, as gdalwarp's default (`UNIFIED_SRC_NODATA=PARTIAL`) has it: a
+        // colour pixel with one channel at the no-data value keeps its value, and that channel
+        // blends from the neighbours.
+        if (0..out.len()).all(|b| Some(b) == self.alpha || self.at(b, centre).is_none()) {
+            out.fill(f32::NAN);
+            return;
+        }
         for (b, o) in out.iter_mut().enumerate() {
-            if self.at(b, centre).is_none() {
-                *o = f32::NAN;
-                continue;
-            }
             let cubic = (self.method == Resampling::Cubic).then(|| self.cubic(b, &index, i0, j0, fu, fv)).flatten();
             *o = cubic.unwrap_or_else(|| self.bilinear(b, &index, i0, j0, fu, fv));
             if self.round && o.is_finite() {
@@ -1035,6 +1037,31 @@ mod tests {
                     assert!((a - b).abs() < 1e-4, "cell ({col}, {row}): {out:?}");
                 }
             }
+        }
+    }
+
+    /// A colour pixel has no value only where every channel is no-data: one channel at the
+    /// no-data value blends from the neighbours, as in gdalwarp (`UNIFIED_SRC_NODATA=PARTIAL`).
+    #[test]
+    fn a_colour_cell_needs_every_channel_no_data_to_have_no_value() {
+        // 6 × 6 pixels of (100, 150, 200), no-data 0: pixel (2, 2) has red 0, pixel (4, 4) is 0 in
+        // every channel. Cells shifted a quarter pixel, so cell (k, r) is centred in pixel (k, r + 1).
+        let mut bands = vec![vec![100.0f32; 36], vec![150.0; 36], vec![200.0; 36]];
+        bands[0][14] = 0.0;
+        for band in &mut bands {
+            band[28] = 0.0;
+        }
+        let gt = GeoTransform { origin_x: 0.0, origin_y: 6.0, pixel_width: 1.0, pixel_height: -1.0 };
+        let crs = Crs::from_epsg(32613).unwrap();
+        let r = Raster::new("rgb", 6, 6, bands, gt, crs, Some(0.0), ColorHint::Rgb { alpha: false }, "UInt8").unwrap();
+        let g = Grid::snapped(r.crs, [0.25, 0.25, 5.25, 5.25], (1.0, 1.0), (0.25, 0.25)).unwrap();
+        // gdalwarp -r bilinear and -r cubic (GDAL 3.12.2 and 3.13.1): (100, 150, 200) over the
+        // pixel with red 0, and no value over the one that is 0 in every channel.
+        for method in [Resampling::Bilinear, Resampling::Cubic] {
+            let out = project(&r, &g, Method::Sample(method), "o".into()).unwrap();
+            let cell = |c, row| (0..3).map(|b| out.value(b, c, row)).collect::<Vec<_>>();
+            assert_eq!(cell(2, 1), [Some(100.0), Some(150.0), Some(200.0)], "{method:?}");
+            assert_eq!(cell(4, 3), [None, None, None], "{method:?}");
         }
     }
 
