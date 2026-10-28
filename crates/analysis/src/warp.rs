@@ -145,7 +145,8 @@ impl Sampler<'_> {
         // value (gdalwarp with `-srcnodata nan`). The pixel has no value only where every band
         // but alpha is no-data, as gdalwarp's default (`UNIFIED_SRC_NODATA=PARTIAL`) has it: a
         // colour pixel with one channel at the no-data value keeps its value, and that channel
-        // blends from the neighbours.
+        // blends from the neighbours. At the pixel's exact centre only that pixel weighs, so the
+        // channel has no value there, as in gdalwarp.
         if (0..out.len()).all(|b| Some(b) == self.alpha || self.at(b, centre).is_none()) {
             out.fill(f32::NAN);
             return;
