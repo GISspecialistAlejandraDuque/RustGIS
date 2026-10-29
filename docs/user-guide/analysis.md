@@ -515,7 +515,7 @@ The Analyze tab's imagery groups open their tools in the Workflows pane:
     pixel (or on NaN, with or without a no-data value; in a colour image, no-data in every
     channel) is no-data; otherwise they interpolate from the pixels around it that have a value,
     as gdalwarp does. Going coarser, they skip the detail between cell centres and can give a jagged
-    result: use `average` there, which comes closest to gdalwarp's smoothing. `average` and `mode`
+    result, where gdalwarp widens its kernel to smooth it. `average` and `mode`
     take every pixel whose centre falls in the cell (no-data skipped), its mean or its most frequent
     value (of those tied, the one that reaches the top count first, the pixels taken row by row, as
     in GDAL), which is what a coarser grid of elevation or land-cover classes should hold. A

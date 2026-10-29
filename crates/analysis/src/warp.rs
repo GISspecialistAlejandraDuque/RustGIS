@@ -949,8 +949,8 @@ mod tests {
     /// no-data pixel has no value, even with valid pixels around it.
     #[test]
     fn warp_leaves_a_cell_over_no_data_without_a_value() {
-        // 6 × 6 pixels of 10 with a 2 × 2 no-data hole at columns and rows 2–3, placed 1 m a pixel
-        // with no turn; half-metre cells, centred a quarter pixel from the pixel edges.
+        // 6 × 6 pixels of 10 with a 2 × 2 no-data hole at columns and rows 2–3, 1 m square and
+        // unrotated; half-metre cells, centred a quarter pixel from the pixel edges.
         let gt = GeoTransform { origin_x: 0.0, origin_y: 6.0, pixel_width: 1.0, pixel_height: -1.0 };
         let mut data = vec![10.0f32; 36];
         for idx in [14, 15, 20, 21] {
